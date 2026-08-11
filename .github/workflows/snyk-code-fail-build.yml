@@ -1,0 +1,46 @@
+name: Snyk Code Scan (fail on high/critical)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch: {}
+
+jobs:
+  snyk-code:
+    name: Snyk Code (SAST) - fails build on high/critical
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run Snyk Code scan
+        uses: snyk/actions/node@master
+        # NOTE: no continue-on-error here — a failed step (i.e. high/critical
+        # findings) will fail this job and the overall workflow/build.
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: code test
+          # --severity-threshold=high makes Snyk only report (and fail on)
+          # high and critical severity issues; low/medium are ignored for
+          # the purposes of the exit code, but still show up in the SARIF.
+          args: --severity-threshold=high --sarif-file-output=snyk-code.sarif
+
+      - name: Upload results to GitHub Security tab
+        if: always() && hashFiles('snyk-code.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk-code.sarif
+          category: snyk-code
