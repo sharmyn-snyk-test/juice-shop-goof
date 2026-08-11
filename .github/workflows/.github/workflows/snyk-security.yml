@@ -1,42 +1,74 @@
-name: "Snyk Security Scan"
+name: Snyk Security Scan
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [ "main", "master" ]
+  workflow_dispatch: {}
 
 jobs:
-  snyk:
+  snyk-open-source:
+    name: Snyk Open Source (dependencies)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: npm install --package-lock-only # Snyk needs the lockfile to scan accurately
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      # 1. Scan Open Source Dependencies
-      - name: Snyk Open Source Scan
-        continue-on-error: true # Allows upload even if vulnerabilities are found
-        uses: snyk/actions/node@master
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run Snyk Open Source scan
+        uses: snyk/actions/node@master   # use the runtime matching your project, e.g. node / python / golang / maven / gradle
+        continue-on-error: true          # don't fail the build on found vulns; remove this line to fail on vulns
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --sarif-file-output=snyk-oss.sarif
+          args: --severity-threshold=low --sarif-file-output=snyk-open-source.sarif
 
-      # 2. Scan Custom Code (Static Analysis)
-      - name: Snyk Code Scan
-        continue-on-error: true
+      - name: Upload results to GitHub Security tab
+        if: always() && hashFiles('snyk-open-source.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk-open-source.sarif
+          category: snyk-open-source
+
+  snyk-code:
+    name: Snyk Code (SAST)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run Snyk Code scan
         uses: snyk/actions/node@master
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           command: code test
-          args: --sarif-file-output=snyk-code.sarif
+          args: --severity-threshold=low --sarif-file-output=snyk-code.sarif
 
-      # 3. Upload results to GitHub Security Tab
-      - name: Upload SARIF to GitHub
+      - name: Upload results to GitHub Security tab
+        if: always() && hashFiles('snyk-code.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: . # This will pick up both sarif files
+          sarif_file: snyk-code.sarif
+          category: snyk-code
